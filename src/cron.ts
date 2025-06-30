@@ -45,7 +45,7 @@ cron.schedule(
 
           // 1) Fetch account via the Account-v1 endpoint and X-Riot-Token header
           const accountRes = await axios.get<AccountDto>(
-            `https://${u.lol_server_name}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/` +
+            `https://${u.region}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/` +
               `${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}`,
             {
               headers: {
@@ -55,15 +55,12 @@ cron.schedule(
           );
           const puuid = accountRes.data.puuid;
 
-          const fiveMinutesAgoEpoch = Math.floor(
-            (Date.now() - 5 * 60 * 1000) / 1000
-          );
-
+          
           // 2) Fetch the most recent match ID
           const { data: matchIds } = await axios.get<string[]>(
-            `https://${u.lol_server_name}.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids`,
+            `https://${u.region}.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids`,
             {
-              params: { start: 0, count: 1, startTime: fiveMinutesAgoEpoch },
+              params: { start: 0, count: 1 },
               headers: {
                 "X-Riot-Token": process.env.RIOT_API_KEY!,
               },
@@ -71,16 +68,23 @@ cron.schedule(
           );
           if (matchIds.length === 0) continue;
           const matchId = matchIds[0];
-
+          
           // 3) Fetch match details
           const { data: match } = await axios.get<any>(
-            `https://${u.lol_server_name}.api.riotgames.com/lol/match/v5/matches/${matchId}`,
+            `https://${u.region}.api.riotgames.com/lol/match/v5/matches/${matchId}`,
             {
               headers: {
                 "X-Riot-Token": process.env.RIOT_API_KEY!,
               },
             }
           );
+          
+          const fiveMinutesAgoEpoch = Math.floor(
+            (Date.now() - 5 * 60 * 1000) / 1000
+          );
+
+          if (match.info.gameEndTimestamp < fiveMinutesAgoEpoch * 1000) continue;
+          console.log(`${match.info.gameType} ${match.info.gameMode}`);
 
           // 4) Find participant and compute KDA
           const participant = match.info.participants.find(
@@ -97,15 +101,13 @@ cron.schedule(
               .setColor("#ED4245")
               .setTitle("⚠️ Alerte KDA négatif")
               .setDescription(
-                `<@${u.user_id}>, ${
-                  catchPhrases[Math.floor(Math.random() * catchPhrases.length)]
-                }`
+                catchPhrases[Math.floor(Math.random() * catchPhrases.length)]
               )
               .addFields(
                 { name: "Pseudo Riot", value: u.riot_id, inline: true },
                 {
                   name: "Région",
-                  value: u.lol_server_name.toUpperCase(),
+                  value: u.region.toUpperCase(),
                   inline: true,
                 },
                 { name: "Kills", value: `${kills}`, inline: true },
@@ -116,14 +118,17 @@ cron.schedule(
               .setFooter({ text: "Alerté automatiquement" })
               .setTimestamp();
 
-            await channel.send({ embeds: [alertEmbed] });
+            await channel.send({ 
+              content: `<@${u.user_id}>`,
+              embeds: [alertEmbed] 
+            });
           }
           console.log(
-            `KDA pour ${u.riot_id}@${u.lol_server_name}: ${participant.kills}/${participant.deaths} (K-D: ${kdaValue})`
+            `KDA pour ${u.riot_id}@${u.region}: ${participant.kills}/${participant.deaths} (K-D: ${kdaValue})`
           );
         } catch (err: any) {
           console.error(
-            `Erreur pour ${u.riot_id}@${u.lol_server_name}:`,
+            `Erreur pour ${u.riot_id}@${u.region}:`,
             err.message
           );
         }
